@@ -1,0 +1,41 @@
+<!Doctupe html>
+<html>
+<head>
+<style>
+body{
+margin:0;
+padding:0;
+background-color:black;
+}
+</style>
+<meta charset="UTF-8">
+<title>Фрактал</title>
+</head>
+<body>
+  <canvas id="myCanvas"></canvas>
+<script>
+  var this_canvas = document.getElementById('myCanvas'),
+  context = this_canvas.getContext('2d');
+  
+function my_draw(x1,y1,x2,y2,depth){
+	if(depth === 0){
+	context.fillRect(x1,y1,2,2);
+	context.fillRect(x2,y2,2,2);
+	return;
+	}
+  var dx = (x2-x1)/2,
+      dy = (y2-y1)/2,
+	  x_new=x1+dx-dy,
+	  y_new=y1+dy+dx;
+  my_draw(x1,y1,x_new,y_new,depth-1);
+  my_draw(x2,y2,x_new,y_new,depth-1);
+}
+
+
+this_canvas.width='900'
+this_canvas.height='600'
+context.fillStyle = 'rgb(255,0,0)'
+my_draw(500-256,200,500+256,200,16);
+</script>
+</body>
+</html>
