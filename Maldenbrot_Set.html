@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Mandelbrot Set - Infinite Zoom</title>
+<style>
+  body {
+    margin: 0;
+    padding: 20px;
+    font-family: Arial, sans-serif;
+    background: #1a1a1a;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  h2 {
+    margin: 10px 0;
+  }
+  #info {
+    background: rgba(0, 0, 0, 0.7);
+    padding: 15px;
+    border-radius: 8px;
+    margin: 10px 0;
+    font-size: 14px;
+    max-width: 1000px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  #controls {
+    margin: 10px 0;
+  }
+  button {
+    background: #4CAF50;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    margin: 5px;
+    cursor: pointer;
+    border-radius: 5px;
+    font-size: 14px;
+  }
+  button:hover {
+    background: #45a049;
+  }
+  #canvasContainer {
+    position: relative;
+    display: inline-block;
+  }
+  #canvas {
+    border: 2px solid #333;
+    cursor: crosshair;
+    display: block;
+  }
+  #selectionCanvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+  }
+  #status {
+    margin-top: 10px;
+    font-size: 12px;
+    color: #aaa;
+  }
+</style>
+</head>
+<body>
+<h2>Множество Мандельброта - Выделение области</h2>
+<div id="info">
+  <strong>Управление:</strong><br>
+  • <strong>Зажмите и тяните мышь</strong> - выделите прямоугольную область для приближения<br>
+  • <strong>Колесо мыши</strong> - плавное масштабирование в центре<br>
+  • <strong>Правая кнопка + тяните</strong> - перемещение области<br>
+  • <strong>Двойной клик</strong> - приближение 2x к точке<br>
+  <div id="coords" style="margin-top: 10px; font-family: monospace;"></div>
+</div>
+<div id="controls">
+  <button onclick="resetView()">Сбросить</button>
+  <button onclick="increaseIterations()">Больше деталей (+500 итераций)</button>
+  <button onclick="decreaseIterations()">Меньше деталей (-500 итераций)</button>
+</div>
+<div id="canvasContainer">
+  <canvas id="canvas" width="1000" height="1000"></canvas>
+  <canvas id="selectionCanvas" width="1000" height="1000"></canvas>
+</div>
+<div id="status"></div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const selectionCanvas = document.getElementById('selectionCanvas');
+const selectionCtx = selectionCanvas.getContext('2d');
+const width = canvas.width;
+const height = canvas.height;
+
+// Параметры области просмотра
+let viewState = {
+  xmin: -2.5,
+  xmax: 1.5,
+  ymin: -2.0,
+  ymax: 2.0,
+  iterations: 2000
+};
+
+// Для выделения области
+let isSelecting = false;
+let isPanning = false;
+let selectionStart = { x: 0, y: 0 };
+let selectionEnd = { x: 0, y: 0 };
+let panStart = { x: 0, y: 0 };
+let panStartView = { xmin: 0, xmax: 0, ymin: 0, ymax: 0 };
+
+function mandelbrotIteration(cx, cy, maxIter) {
+  let x = 0.0;
+  let y = 0.0;
+  let xx = 0;
+  let yy = 0;
+  let xy = 0;
+  let i = maxIter;
+  
+  while (i-- && xx + yy <= 4) {
+    xy = x * y;
+    xx = x * x;
+    yy = y * y;
+    x = xx - yy + cx;
+    y = xy + xy + cy;
+  }
+  return maxIter - i;
+}
+
+function mandelbrot(xmin, xmax, ymin, ymax, iterations) {
+  const startTime = performance.now();
+  document.getElementById('status').textContent = 'Рендеринг...';
+  
+  const image = ctx.createImageData(width, height);
+  const pixels = image.data;
+  
+  for (let ix = 0; ix < width; ix++) {
+    for (let iy = 0; iy < height; iy++) {
+      const x = xmin + (xmax - xmin) * ix / (width - 1);
+      const y = ymin + (ymax - ymin) * iy / (height - 1);
+      const i = mandelbrotIteration(x, y, iterations);
+      const pixelPos = 4 * (width * iy + ix);
+      
+      if (i >= iterations) {
+        pixels[pixelPos] = 0;
+        pixels[pixelPos + 1] = 0;
+        pixels[pixelPos + 2] = 0;
+      } else {
+        const color = 3 * Math.log(i + 1) / Math.log(iterations);
+        
+        if (color < 1) {
+          pixels[pixelPos] = 255 * color;
+          pixels[pixelPos + 1] = 0;
+          pixels[pixelPos + 2] = 0;
+        } else if (color < 2) {
+          pixels[pixelPos] = 255;
+          pixels[pixelPos + 1] = 255 * (color - 1);
+          pixels[pixelPos + 2] = 0;
+        } else {
+          pixels[pixelPos] = 255;
+          pixels[pixelPos + 1] = 255;
+          pixels[pixelPos + 2] = 255 * (color - 2);
+        }
+      }
+      pixels[pixelPos + 3] = 255;
+    }
+  }
+  
+  ctx.putImageData(image, 0, 0);
+  
+  const endTime = performance.now();
+  const renderTime = ((endTime - startTime) / 1000).toFixed(2);
+  document.getElementById('status').textContent = `Рендеринг завершен за ${renderTime} сек`;
+  
+  updateCoordinates();
+}
+
+function updateCoordinates() {
+  const zoom = 4.0 / (viewState.xmax - viewState.xmin);
+  const centerX = (viewState.xmin + viewState.xmax) / 2;
+  const centerY = (viewState.ymin + viewState.ymax) / 2;
+  
+  document.getElementById('coords').innerHTML = 
+    `Центр: (${centerX.toFixed(10)}, ${centerY.toFixed(10)})<br>` +
+    `Масштаб: ${zoom.toFixed(2)}x | Итерации: ${viewState.iterations}`;
+}
+
+function pixelToComplex(px, py) {
+  const x = viewState.xmin + (viewState.xmax - viewState.xmin) * px / width;
+  const y = viewState.ymin + (viewState.ymax - viewState.ymin) * py / height;
+  return { x, y };
+}
+
+function drawSelectionBox(x1, y1, x2, y2) {
+  selectionCtx.clearRect(0, 0, width, height);
+  
+  // Делаем квадратное выделение (пропорциональное canvas)
+  const w = Math.abs(x2 - x1);
+  const h = Math.abs(y2 - y1);
+  const size = Math.max(w, h);
+  
+  const left = x1 < x2 ? x1 : x1 - size;
+  const top = y1 < y2 ? y1 : y1 - size;
+  
+  // Рисуем прямоугольник выделения
+  selectionCtx.strokeStyle = '#00ff00';
+  selectionCtx.lineWidth = 2;
+  selectionCtx.setLineDash([5, 5]);
+  selectionCtx.strokeRect(left, top, size, size);
+  
+  // Полупрозрачная заливка
+  selectionCtx.fillStyle = 'rgba(0, 255, 0, 0.1)';
+  selectionCtx.fillRect(left, top, size, size);
+  
+  selectionCtx.setLineDash([]);
+}
+
+function zoomToSelection(x1, y1, x2, y2) {
+  // Делаем квадратное выделение
+  const w = Math.abs(x2 - x1);
+  const h = Math.abs(y2 - y1);
+  const size = Math.max(w, h);
+  
+  const left = Math.min(x1, x2);
+  const top = Math.min(y1, y2);
+  const right = left + size;
+  const bottom = top + size;
+  
+  // Конвертируем в комплексные координаты
+  const topLeft = pixelToComplex(left, top);
+  const bottomRight = pixelToComplex(right, bottom);
+  
+  viewState.xmin = topLeft.x;
+  viewState.ymin = topLeft.y;
+  viewState.xmax = bottomRight.x;
+  viewState.ymax = bottomRight.y;
+  
+  // Увеличиваем детализацию при зуме
+  const currentZoom = 4.0 / (viewState.xmax - viewState.xmin);
+  viewState.iterations = Math.max(2000, Math.min(10000, Math.floor(1000 + currentZoom * 50)));
+  
+  render();
+}
+
+function render() {
+  mandelbrot(viewState.xmin, viewState.xmax, viewState.ymin, viewState.ymax, viewState.iterations);
+}
+
+// Обработчики событий мыши
+canvas.addEventListener('mousedown', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  
+  if (e.button === 0) { // Левая кнопка - выделение
+    isSelecting = true;
+    selectionStart = { x, y };
+    selectionEnd = { x, y };
+    canvas.style.cursor = 'crosshair';
+  } else if (e.button === 2) { // Правая кнопка - перемещение
+    isPanning = true;
+    panStart = { x: e.clientX, y: e.clientY };
+    panStartView = { ...viewState };
+    canvas.style.cursor = 'grabbing';
+  }
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  
+  if (isSelecting) {
+    selectionEnd = { x, y };
+    drawSelectionBox(selectionStart.x, selectionStart.y, selectionEnd.x, selectionEnd.y);
+  } else if (isPanning) {
+    const dx = e.clientX - panStart.x;
+    const dy = e.clientY - panStart.y;
+    
+    const xRange = panStartView.xmax - panStartView.xmin;
+    const yRange = panStartView.ymax - panStartView.ymin;
+    
+    const xShift = -dx * xRange / width;
+    const yShift = -dy * yRange / height;
+    
+    viewState.xmin = panStartView.xmin + xShift;
+    viewState.xmax = panStartView.xmax + xShift;
+    viewState.ymin = panStartView.ymin + yShift;
+    viewState.ymax = panStartView.ymax + yShift;
+    
+    render();
+  }
+});
+
+canvas.addEventListener('mouseup', (e) => {
+  if (isSelecting) {
+    const dx = Math.abs(selectionEnd.x - selectionStart.x);
+    const dy = Math.abs(selectionEnd.y - selectionStart.y);
+    
+    // Если выделение достаточно большое, зумим
+    if (dx > 10 || dy > 10) {
+      zoomToSelection(selectionStart.x, selectionStart.y, selectionEnd.x, selectionEnd.y);
+    }
+    
+    selectionCtx.clearRect(0, 0, width, height);
+    isSelecting = false;
+  } else if (isPanning) {
+    isPanning = false;
+  }
+  
+  canvas.style.cursor = 'crosshair';
+});
+
+canvas.addEventListener('mouseleave', () => {
+  if (isSelecting) {
+    selectionCtx.clearRect(0, 0, width, height);
+    isSelecting = false;
+  }
+  isPanning = false;
+  canvas.style.cursor = 'crosshair';
+});
+
+// Двойной клик для быстрого зума
+canvas.addEventListener('dblclick', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const px = e.clientX - rect.left;
+  const py = e.clientY - rect.top;
+  
+  const point = pixelToComplex(px, py);
+  
+  const xRange = (viewState.xmax - viewState.xmin) / 2;
+  const yRange = (viewState.ymax - viewState.ymin) / 2;
+  
+  viewState.xmin = point.x - xRange / 2;
+  viewState.xmax = point.x + xRange / 2;
+  viewState.ymin = point.y - yRange / 2;
+  viewState.ymax = point.y + yRange / 2;
+  
+  const currentZoom = 4.0 / (viewState.xmax - viewState.xmin);
+  viewState.iterations = Math.max(2000, Math.min(10000, Math.floor(1000 + currentZoom * 50)));
+  
+  render();
+});
+
+// Отключаем контекстное меню
+canvas.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+});
+
+// Колесо мыши
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  
+  const centerX = (viewState.xmin + viewState.xmax) / 2;
+  const centerY = (viewState.ymin + viewState.ymax) / 2;
+  
+  const factor = e.deltaY > 0 ? 1.1 : 0.9;
+  
+  const xRange = (viewState.xmax - viewState.xmin) * factor;
+  const yRange = (viewState.ymax - viewState.ymin) * factor;
+  
+  viewState.xmin = centerX - xRange / 2;
+  viewState.xmax = centerX + xRange / 2;
+  viewState.ymin = centerY - yRange / 2;
+  viewState.ymax = centerY + yRange / 2;
+  
+  const currentZoom = 4.0 / (viewState.xmax - viewState.xmin);
+  viewState.iterations = Math.max(2000, Math.min(10000, Math.floor(1000 + currentZoom * 50)));
+  
+  render();
+});
+
+function resetView() {
+  viewState.xmin = -2.5;
+  viewState.xmax = 1.5;
+  viewState.ymin = -2.0;
+  viewState.ymax = 2.0;
+  viewState.iterations = 2000;
+  render();
+}
+
+function increaseIterations() {
+  viewState.iterations += 500;
+  render();
+}
+
+function decreaseIterations() {
+  viewState.iterations = Math.max(500, viewState.iterations - 500);
+  render();
+}
+
+// Начальная отрисовка
+render();
+</script>
+</body>
+</html>
